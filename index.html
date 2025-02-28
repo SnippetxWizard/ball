@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced 3D Ball Reflection Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000000; /* Fallback black */
+        }
+        canvas {
+            display: block;
+        }
+        #levelDisplay, #gameOverMessage {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #d4d4d4;
+            font-size: 24px;
+            font-family: 'Arial', sans-serif;
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+            z-index: 10;
+        }
+        #gameOverMessage {
+            top: 40%;
+            font-size: 48px;
+            display: none;
+            text-shadow: 0 0 10px rgba(255, 50, 50, 0.8);
+        }
+        #restartButton {
+            position: absolute;
+            top: 60%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 20px;
+            font-family: 'Arial', sans-serif;
+            color: #ffffff;
+            background-color: #4682B4;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: none;
+            z-index: 10;
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+        }
+        #restartButton:hover {
+            background-color: #5A9BD4;
+        }
+    </style>
+</head>
+<body>
+    <div id="levelDisplay">Level: 1</div>
+    <div id="gameOverMessage">Game Over</div>
+    <button id="restartButton">Restart</button>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+        // UI Elements
+        const levelDisplay = document.getElementById('levelDisplay');
+        const gameOverMessage = document.getElementById('gameOverMessage');
+        const restartButton = document.getElementById('restartButton');
+
+        // Starfield background
+        function createSkybox() {
+            const skyboxGeometry = new THREE.BoxGeometry(1000, 1000, 1000);
+            const skyboxMaterial = [
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
+                new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide })
+            ];
+
+            const starTexture = new THREE.Texture(generateStarfield());
+            starTexture.needsUpdate = true;
+            skyboxMaterial.forEach(material => {
+                material.map = starTexture;
+                material.transparent = true;
+            });
+
+            const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+            scene.add(skybox);
+        }
+
+        function generateStarfield() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            for (let i = 0; i < 1000; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const radius = Math.random() * 1.5;
+                const brightness = Math.random();
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+                ctx.fill();
+            }
+
+            return canvas;
+        }
+
+        // Paddle setup
+        const paddleGeometry = new THREE.BoxGeometry(2, 0.3, 0.3);
+        const paddleMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x4682B4, 
+            metalness: 0.9, 
+            roughness: 0.2, 
+            envMapIntensity: 1.5 
+        });
+        const paddle = new THREE.Mesh(paddleGeometry, paddleMaterial);
+        paddle.position.y = -5;
+        paddle.castShadow = true;
+        paddle.receiveShadow = true;
+        scene.add(paddle);
+
+        // Ball setup
+        const ballGeometry = new THREE.SphereGeometry(0.4, 32, 32);
+        const ballMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xB0C4DE, 
+            metalness: 1.0, 
+            roughness: 0.1, 
+            envMapIntensity: 2.0 
+        });
+        const ball = new THREE.Mesh(ballGeometry, ballMaterial);
+        ball.position.y = 0;
+        ball.castShadow = true;
+        ball.receiveShadow = true;
+        scene.add(ball);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+        scene.add(ambientLight);
+
+        const spotlight = new THREE.SpotLight(0xE6F0FA, 2.0);
+        spotlight.position.set(0, 20, 10);
+        spotlight.castShadow = true;
+        spotlight.shadow.mapSize.width = 2048;
+        spotlight.shadow.mapSize.height = 2048;
+        spotlight.angle = Math.PI / 5;
+        spotlight.penumbra = 0.3;
+        spotlight.distance = 50;
+        scene.add(spotlight);
+
+        const dirLight = new THREE.DirectionalLight(0x87CEEB, 0.5);
+        dirLight.position.set(-10, 15, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Floor
+        const floorGeometry = new THREE.PlaneGeometry(20, 20);
+        const floorMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x4F5B62, 
+            roughness: 0.6, 
+            metalness: 0.05 
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -6;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Game variables
+        let ballSpeedX = 0.1;
+        let ballSpeedY = 0.1;
+        let currentLevel = 1;
+        let boxes = [];
+        const boxSize = 1;
+        let isGameOver = false;
+
+        // Keyboard movement variables
+        let moveLeft = false;
+        let moveRight = false;
+        const paddleSpeed = 0.2; // Speed of paddle movement
+
+        // Create boxes
+        function createBoxes(level) {
+            const boxCount = 7 + (level - 1) * 3;
+            boxes.forEach(box => scene.remove(box));
+            boxes = [];
+            for (let i = 0; i < boxCount; i++) {
+                const boxGeometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+                const boxMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0x00CED1, 
+                    roughness: 0.3, 
+                    metalness: 0.6, 
+                    emissive: 0x00FFFF, 
+                    emissiveIntensity: 0.2,
+                    envMapIntensity: 1.0 
+                });
+                const box = new THREE.Mesh(boxGeometry, boxMaterial);
+                box.position.set(
+                    (Math.random() - 0.5) * 16,
+                    Math.random() * 6 + 2,
+                    0
+                );
+                box.castShadow = true;
+                box.receiveShadow = true;
+                scene.add(box);
+                boxes.push(box);
+            }
+        }
+
+        // Paddle movement (mouse, touch, and keyboard)
+        document.addEventListener('mousemove', (event) => {
+            if (isGameOver) return;
+            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            paddle.position.x = mouseX * 8;
+        });
+
+        document.addEventListener('touchmove', (event) => {
+            if (isGameOver) return;
+            const touchX = event.touches[0].clientX;
+            const normalizedX = (touchX / window.innerWidth) * 2 - 1;
+            paddle.position.x = normalizedX * 8;
+        });
+
+        // Keyboard controls
+        document.addEventListener('keydown', (event) => {
+            if (isGameOver) return;
+            if (event.key === 'a' || event.key === 'A') {
+                moveLeft = true;
+            }
+            if (event.key === 'd' || event.key === 'D') {
+                moveRight = true;
+            }
+        });
+
+        document.addEventListener('keyup', (event) => {
+            if (event.key === 'a' || event.key === 'A') {
+                moveLeft = false;
+            }
+            if (event.key === 'd' || event.key === 'D') {
+                moveRight = false;
+            }
+        });
+
+        // Reset game
+        function resetGame() {
+            isGameOver = false;
+            ball.position.set(0, 0, 0);
+            ballSpeedX = 0.1;
+            ballSpeedY = 0.1;
+            currentLevel = 1;
+            levelDisplay.textContent = `Level: ${currentLevel}`;
+            gameOverMessage.style.display = 'none';
+            restartButton.style.display = 'none';
+            createBoxes(currentLevel);
+            gameLoop();
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (isGameOver) return;
+
+            // Keyboard paddle movement
+            if (moveLeft && paddle.position.x > -8) {
+                paddle.position.x -= paddleSpeed;
+            }
+            if (moveRight && paddle.position.x < 8) {
+                paddle.position.x += paddleSpeed;
+            }
+
+            // Ball movement
+            ball.position.x += ballSpeedX;
+            ball.position.y += ballSpeedY;
+
+            if (
+                ball.position.y <= paddle.position.y + 0.3 &&
+                Math.abs(ball.position.x - paddle.position.x) < 1.5
+            ) {
+                ballSpeedY = Math.abs(ballSpeedY);
+                ballSpeedX += (ball.position.x - paddle.position.x) * 0.05;
+            }
+
+            if (ball.position.x <= -10 || ball.position.x >= 10) {
+                ballSpeedX = -ballSpeedX;
+            }
+            if (ball.position.y >= 10) {
+                ballSpeedY = -ballSpeedY;
+            }
+
+            boxes.forEach((box, index) => {
+                if (
+                    Math.abs(ball.position.x - box.position.x) < boxSize / 2 &&
+                    Math.abs(ball.position.y - box.position.y) < boxSize / 2
+                ) {
+                    scene.remove(box);
+                    boxes.splice(index, 1);
+                    ballSpeedY = -ballSpeedY;
+                }
+            });
+
+            if (boxes.length === 0) {
+                currentLevel++;
+                levelDisplay.textContent = `Level: ${currentLevel}`;
+                ballSpeedX *= 1.1;
+                ballSpeedY *= 1.1;
+                createBoxes(currentLevel);
+            }
+
+            if (ball.position.y <= -6) {
+                isGameOver = true;
+                gameOverMessage.style.display = 'block';
+                restartButton.style.display = 'block';
+            }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Resize canvas
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Add walls
+        function createWalls() {
+            const wallMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x2F4F4F, 
+                roughness: 0.5, 
+                metalness: 0.7 
+            });
+
+            const leftWallGeometry = new THREE.BoxGeometry(0.5, 20, 10);
+            const leftWall = new THREE.Mesh(leftWallGeometry, wallMaterial);
+            leftWall.position.set(-10.25, 0, 0);
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+
+            const rightWallGeometry = new THREE.BoxGeometry(0.5, 20, 10);
+            const rightWall = new THREE.Mesh(rightWallGeometry, wallMaterial);
+            rightWall.position.set(10.25, 0, 0);
+            rightWall.receiveShadow = true;
+            scene.add(rightWall);
+
+            const topWallGeometry = new THREE.BoxGeometry(20, 0.5, 10);
+            const topWall = new THREE.Mesh(topWallGeometry, wallMaterial);
+            topWall.position.set(0, 10.25, 0);
+            topWall.receiveShadow = true;
+            scene.add(topWall);
+
+            const bottomWallGeometry = new THREE.BoxGeometry(20, 0.5, 10);
+            const bottomWall = new THREE.Mesh(bottomWallGeometry, wallMaterial);
+            bottomWall.position.set(0, -6.25, 0);
+            bottomWall.receiveShadow = true;
+            scene.add(bottomWall);
+        }
+
+        // Environment map for reflections
+        const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128);
+        const cubeCamera = new THREE.CubeCamera(1, 1000, cubeRenderTarget);
+        scene.add(cubeCamera);
+        paddleMaterial.envMap = cubeRenderTarget.texture;
+        ballMaterial.envMap = cubeRenderTarget.texture;
+
+        // Restart button event
+        restartButton.addEventListener('click', resetGame);
+
+        // Start the game
+        createSkybox();
+        createWalls();
+        camera.position.z = 15;
+        createBoxes(currentLevel);
+        gameLoop();
+
+        // Update reflections
+        function updateReflections() {
+            cubeCamera.update(renderer, scene);
+            requestAnimationFrame(updateReflections);
+        }
+        updateReflections();
+    </script>
+</body>
+</html>
